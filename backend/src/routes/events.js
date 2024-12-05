@@ -4,28 +4,46 @@ import QRCode from 'qrcode';
 import db from '../db/index.js';
 import { authenticateToken, authorize } from '../middleware/auth.js';
 import { randomUUID } from 'crypto';
+import { redis } from '../index.js';
+import { sanitizeHtml } from 'sanitize-html';
 
 const router = express.Router();
 
+const CACHE_TTL = 300; // 5 minutes in seconds
+
 const eventSchema = z.object({
-  title: z.string().min(3),
-  description: z.string(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  location: z.string(),
+  title: z.string().min(3).max(100).transform(val => sanitizeHtml(val)),
+  description: z.string().max(1000).transform(val => sanitizeHtml(val)),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(val => new Date(val) > new Date(), {
+    message: "Event date must be in the future"
+  }),
+  location: z.string().min(3).max(200).transform(val => sanitizeHtml(val)),
   category: z.enum(['academic', 'cultural', 'sports', 'technical']),
-  capacity: z.number().int().positive()
+  capacity: z.number().int().positive().max(10000),
+  ticketPrice: z.number().min(0).optional(),
+  isVirtual: z.boolean().optional(),
+  registrationDeadline: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
 });
 
-// Get all events with filters
+// Get all events with filters and caching
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const { category, search, date } = req.query;
+    const cacheKey = `events:${category || 'all'}:${search || 'none'}:${date || 'all'}`;
+    
+    // Try to get from cache first
+    const cachedEvents = await redis.get(cacheKey);
+    if (cachedEvents) {
+      return res.json(JSON.parse(cachedEvents));
+    }
+    
     let sql = `
       SELECT e.*, u.name as organizer_name,
-             (SELECT COUNT(*) FROM registrations WHERE event_id = e.id AND status = 'confirmed') as registered_count
+             (SELECT COUNT(*) FROM registrations WHERE event_id = e.id AND status = 'confirmed') as registered_count,
+             (SELECT COUNT(*) FROM registrations WHERE event_id = e.id AND status = 'waitlist') as waitlist_count
       FROM events e
       JOIN users u ON e.organizer_id = u.id
-      WHERE 1=1
+      WHERE e.date >= CURRENT_DATE
     `;
     const params = [];
 
@@ -47,8 +65,13 @@ router.get('/', authenticateToken, async (req, res) => {
     sql += ' ORDER BY e.date ASC';
 
     const events = await db.query(sql, params);
+    
+    // Cache the results
+    await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(events));
+    
     res.json(events);
   } catch (error) {
+    console.error('Error fetching events:', error);
     res.status(500).json({ error: 'Failed to fetch events' });
   }
 });
@@ -59,7 +82,8 @@ router.get('/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const events = await db.query(
       `SELECT e.*, u.name as organizer_name,
-              (SELECT COUNT(*) FROM registrations WHERE event_id = e.id AND status = 'confirmed') as registered_count
+              (SELECT COUNT(*) FROM registrations WHERE event_id = e.id AND status = 'confirmed') as registered_count,
+              (SELECT COUNT(*) FROM registrations WHERE event_id = e.id AND status = 'waitlist') as waitlist_count
        FROM events e
        JOIN users u ON e.organizer_id = u.id
        WHERE e.id = ?`,
@@ -93,8 +117,8 @@ router.post('/', authenticateToken, authorize(['admin', 'organizer']), async (re
     const eventId = randomUUID();
 
     await db.exec(
-      `INSERT INTO events (id, title, description, date, location, organizer_id, category, capacity)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO events (id, title, description, date, location, organizer_id, category, capacity, ticketPrice, isVirtual, registrationDeadline)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         eventId,
         validatedData.title,
@@ -103,7 +127,10 @@ router.post('/', authenticateToken, authorize(['admin', 'organizer']), async (re
         validatedData.location,
         req.user.id,
         validatedData.category,
-        validatedData.capacity
+        validatedData.capacity,
+        validatedData.ticketPrice,
+        validatedData.isVirtual,
+        validatedData.registrationDeadline
       ]
     );
 
@@ -134,7 +161,7 @@ router.put('/:id', authenticateToken, authorize(['admin', 'organizer']), async (
 
     await db.exec(
       `UPDATE events 
-       SET title = ?, description = ?, date = ?, location = ?, category = ?, capacity = ?
+       SET title = ?, description = ?, date = ?, location = ?, category = ?, capacity = ?, ticketPrice = ?, isVirtual = ?, registrationDeadline = ?
        WHERE id = ?`,
       [
         validatedData.title,
@@ -143,6 +170,9 @@ router.put('/:id', authenticateToken, authorize(['admin', 'organizer']), async (
         validatedData.location,
         validatedData.category,
         validatedData.capacity,
+        validatedData.ticketPrice,
+        validatedData.isVirtual,
+        validatedData.registrationDeadline,
         id
       ]
     );
@@ -182,47 +212,84 @@ router.delete('/:id', authenticateToken, authorize(['admin', 'organizer']), asyn
   }
 });
 
-// Register for event
+// Register for an event with waitlist support
 router.post('/:id/register', authenticateToken, async (req, res) => {
+  const { id: eventId } = req.params;
+  const userId = req.user.id;
+
   try {
-    const { id: eventId } = req.params;
-    const userId = req.user.id;
-
-    const events = await db.query('SELECT * FROM events WHERE id = ?', [eventId]);
-    const event = events[0];
+    // Start transaction
+    await db.exec('BEGIN');
     
-    if (!event) {
-      return res.status(404).json({ error: 'Event not found' });
-    }
-
-    const registrationCount = await db.query(
-      'SELECT COUNT(*) as count FROM registrations WHERE event_id = ? AND status = "confirmed"',
-      [eventId]
-    );
-
-    if (registrationCount[0].count >= event.capacity) {
-      return res.status(400).json({ error: 'Event is at full capacity' });
-    }
-
-    const existingRegistration = await db.query(
+    // Check if already registered
+    const existingReg = await db.query(
       'SELECT * FROM registrations WHERE event_id = ? AND user_id = ?',
       [eventId, userId]
     );
-
-    if (existingRegistration.length > 0) {
+    
+    if (existingReg.length > 0) {
+      await db.exec('ROLLBACK');
       return res.status(400).json({ error: 'Already registered for this event' });
     }
-
-    const registrationId = randomUUID();
-    const qrCode = await QRCode.toDataURL(registrationId);
-
-    await db.exec(
-      'INSERT INTO registrations (id, event_id, user_id, status, qr_code) VALUES (?, ?, ?, ?, ?)',
-      [registrationId, eventId, userId, 'confirmed', qrCode]
+    
+    // Get event details with current registration count
+    const [event] = await db.query(
+      `SELECT e.*, 
+              (SELECT COUNT(*) FROM registrations 
+               WHERE event_id = e.id AND status = 'confirmed') as registered_count
+       FROM events e WHERE e.id = ?`,
+      [eventId]
     );
-
-    res.status(201).json({ registrationId, qrCode });
+    
+    if (!event) {
+      await db.exec('ROLLBACK');
+      return res.status(404).json({ error: 'Event not found' });
+    }
+    
+    // Check if registration deadline has passed
+    if (event.registrationDeadline && new Date(event.registrationDeadline) < new Date()) {
+      await db.exec('ROLLBACK');
+      return res.status(400).json({ error: 'Registration deadline has passed' });
+    }
+    
+    // Determine registration status
+    const status = event.registered_count < event.capacity ? 'confirmed' : 'waitlist';
+    const registrationId = randomUUID();
+    
+    // Create registration
+    await db.exec(
+      `INSERT INTO registrations (id, event_id, user_id, status, registration_time)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      [registrationId, eventId, userId, status]
+    );
+    
+    // Generate QR code if confirmed
+    let qrCode = null;
+    if (status === 'confirmed') {
+      qrCode = await QRCode.toDataURL(registrationId);
+      await db.exec(
+        'UPDATE registrations SET qr_code = ? WHERE id = ?',
+        [qrCode, registrationId]
+      );
+    }
+    
+    await db.exec('COMMIT');
+    
+    // Invalidate cache
+    await redis.del(`events:*`);
+    
+    res.json({
+      message: status === 'confirmed' 
+        ? 'Successfully registered for the event' 
+        : 'Added to waitlist',
+      status,
+      qrCode,
+      position: status === 'waitlist' ? event.registered_count - event.capacity + 1 : null
+    });
+    
   } catch (error) {
+    await db.exec('ROLLBACK');
+    console.error('Error registering for event:', error);
     res.status(500).json({ error: 'Failed to register for event' });
   }
 });

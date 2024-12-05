@@ -1,213 +1,271 @@
-# College Event Management System
 
-A comprehensive system for managing college events, including event creation, registration, and attendance tracking.
+# Event Management System Backend
 
-## Core Features
+A comprehensive backend system for managing events, vendors, registrations, and sales. The system supports multiple user roles and portal-specific access control.
 
-- User authentication and authorization (Admin, Organizer, Attendee roles)
-- Event management (CRUD operations)
-- Event registration with QR code generation
-- Event filtering and search
-- Attendance tracking
-- User profile management
+## 🌟 Features
 
-## Project Structure
+### Authentication & Authorization
+- Multi-portal authentication system (Admin, Vendor, Organizer, Attendee)
+- Role-based access control
+- Session management with Redis
+- Secure token-based authentication
+- Admin-controlled user management
 
-```
-college-event-system/
-├── backend/
-│   ├── src/
-│   │   ├── db/
-│   │   │   └── index.js
-│   │   ├── middleware/
-│   │   │   └── auth.js
-│   │   ├── routes/
-│   │   │   ├── auth.js
-│   │   │   ├── events.js
-│   │   │   └── users.js
-│   │   ├── index.js
-│   │   └── test.js
-│   └── package.json
-└── package.json
-```
+### Event Management
+- Comprehensive event creation and management
+- Multi-day event support with sessions
+- Registration system with waitlist functionality
+- QR code generation for tickets
+- Event feedback and ratings
 
-## Database Schema
+### Vendor Management
+- Booth application and approval system
+- Product management
+- Real-time sales tracking
+- Sales analytics and reporting
+- Vendor ratings and reviews
 
-### Users Table
+### Admin Dashboard
+- System-wide analytics
+- User management and role control
+- Vendor application processing
+- Event monitoring
+- System health tracking
+
+## 🏗 System Architecture
+
+### Database Schema
 ```sql
-CREATE TABLE users (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    role TEXT CHECK(role IN ('admin', 'organizer', 'attendee')) NOT NULL
-);
+Key Tables:
+- users (role-based access control)
+- events (event management)
+- event_sessions (multi-day events)
+- registrations (with waitlist)
+- vendor_booths
+- vendor_products
+- sales_transactions
+- feedback and ratings
 ```
 
-### Events Table
-```sql
-CREATE TABLE events (
-    id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    description TEXT,
-    date TEXT NOT NULL,
-    location TEXT NOT NULL,
-    organizer_id TEXT NOT NULL,
-    category TEXT NOT NULL,
-    capacity INTEGER,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (organizer_id) REFERENCES users (id)
-);
-```
+### Portal Access Matrix
+| Portal    | Allowed Roles                    |
+|-----------|----------------------------------|
+| Admin     | admin                            |
+| Vendor    | vendor                           |
+| Organizer | organizer                        |
+| Attendee  | attendee, organizer, admin       |
 
-### Registrations Table
-```sql
-CREATE TABLE registrations (
-    id TEXT PRIMARY KEY,
-    event_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    status TEXT CHECK(status IN ('pending', 'confirmed', 'cancelled')) NOT NULL,
-    registration_date TEXT DEFAULT CURRENT_TIMESTAMP,
-    qr_code TEXT,
-    FOREIGN KEY (event_id) REFERENCES events (id),
-    FOREIGN KEY (user_id) REFERENCES users (id)
-);
-```
+## 🚀 Getting Started
 
-## Setup
+### Prerequisites
+- Node.js >= 14
+- Redis server
+- SQLite3
 
-1. Clone the repository
+### Installation
+
+1. Clone the repository:
 ```bash
-git clone [repository-url]
-cd college-event-system
+git clone https://github.com/yourusername/event-management-system.git
+cd event-management-system
 ```
 
-2. Install dependencies
+2. Install dependencies:
 ```bash
+cd backend
 npm install
 ```
 
-3. Start the server
+3. Set up environment variables:
+```bash
+cp .env.example .env
+# Edit .env with your configuration
+```
+
+4. Initialize the database:
+```bash
+sqlite3 database.db < src/db/schema.sql
+```
+
+5. Start Redis server:
+```bash
+brew services start redis
+```
+
+6. Start the server:
 ```bash
 npm run dev
 ```
 
-## API Documentation
+## 📚 API Documentation
 
 ### Authentication
 
-#### Register User
-```
+#### Public Registration (Attendees)
+```http
 POST /api/auth/register
-Body: {
-    "name": "string",
-    "email": "string",
-    "password": "string",
-    "role": "admin" | "organizer" | "attendee"
+Content-Type: application/json
+
+{
+  "name": "John Doe",
+  "email": "john@example.com",
+  "password": "securepass"
 }
 ```
 
-#### Login
-```
+#### Portal Login
+```http
 POST /api/auth/login
-Body: {
-    "email": "string",
-    "password": "string"
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "password",
+  "portal": "vendor"  // admin, vendor, organizer, or attendee
 }
 ```
 
-### Events
+### Admin Routes
 
-#### Get All Events
-```
-GET /api/events
-Query Parameters:
-    - category: "academic" | "cultural" | "sports" | "technical"
-    - search: string
-    - date: YYYY-MM-DD
+#### Create User (Admin only)
+```http
+POST /api/auth/users
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "name": "Vendor Name",
+  "email": "vendor@company.com",
+  "role": "vendor",
+  "company": "Company Name"
+}
 ```
 
-#### Get Event by ID
+#### Update User Role (Admin only)
+```http
+PUT /api/auth/users/:id
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "role": "vendor",
+  "status": "active"
+}
 ```
-GET /api/events/:id
-```
+
+### Event Management
 
 #### Create Event
-```
+```http
 POST /api/events
-Body: {
-    "title": "string",
-    "description": "string",
-    "date": "YYYY-MM-DD",
-    "location": "string",
-    "category": "academic" | "cultural" | "sports" | "technical",
-    "capacity": number
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "title": "Tech Conference 2024",
+  "description": "Annual tech conference",
+  "date": "2024-06-15",
+  "location": "Convention Center",
+  "capacity": 500
 }
 ```
 
-#### Update Event
-```
-PUT /api/events/:id
-Body: {
-    "title": "string",
-    "description": "string",
-    "date": "YYYY-MM-DD",
-    "location": "string",
-    "category": "academic" | "cultural" | "sports" | "technical",
-    "capacity": number
+### Vendor Management
+
+#### Apply for Booth
+```http
+POST /api/vendors/booths
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "eventId": "event-uuid",
+  "boothNumber": "A1",
+  "description": "Tech gadgets booth"
 }
 ```
 
-#### Delete Event
+## 🔒 Security Features
+
+- JWT token authentication
+- Redis session management
+- Role-based access control
+- Input validation with Zod
+- Request rate limiting
+- Secure password hashing
+- XSS protection
+- SQL injection prevention
+
+## 💻 Development
+
+### Project Structure
 ```
-DELETE /api/events/:id
+backend/
+├── src/
+│   ├── db/
+│   │   └── schema.sql
+│   ├── middleware/
+│   │   └── auth.js
+│   ├── routes/
+│   │   ├── admin.js
+│   │   ├── auth.js
+│   │   ├── events.js
+│   │   ├── users.js
+│   │   └── vendors.js
+│   └── index.js
+├── package.json
+└── README.md
 ```
 
-### Event Registration
-
-#### Register for Event
-```
-POST /api/events/:id/register
-```
-
-#### Cancel Registration
-```
-DELETE /api/events/:id/register
-```
-
-#### Get Event Attendees
-```
-GET /api/events/:id/attendees
-```
-
-### User Management
-
-#### Get User Profile
-```
-GET /api/users/profile
-```
-
-#### Update User Profile
-```
-PUT /api/users/profile
-Body: {
-    "name": "string"
-}
-```
-
-#### Get User's Registered Events
-```
-GET /api/users/registered-events
-```
-
-#### Get User's Organized Events
-```
-GET /api/users/organized-events
-```
-
-## Testing
-
-Run the test suite:
+### Running Tests
 ```bash
 npm test
 ```
+
+### Environment Variables
+```
+PORT=3000
+JWT_SECRET=your-secret-key
+REDIS_URL=redis://localhost:6379
+NODE_ENV=development
+```
+
+## 📈 Monitoring
+
+The system includes built-in monitoring endpoints:
+
+- `/health` - System health check
+- `/api/admin/system-health` - Detailed system status (Admin only)
+- `/api/admin/analytics` - System-wide analytics (Admin only)
+
+## 🔄 Error Handling
+
+The system implements comprehensive error handling:
+- Validation errors
+- Authentication errors
+- Authorization errors
+- Business logic errors
+- System errors
+
+## 🚧 Future Enhancements
+
+- Email notification system
+- Payment gateway integration
+- OAuth support
+- Advanced analytics
+- Mobile app integration
+- Real-time event updates
+- Automated waitlist management
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a new Pull Request
