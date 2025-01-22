@@ -1,146 +1,138 @@
--- Users table with roles
-CREATE TABLE IF NOT EXISTS users (
+-- Basic Users table
+CREATE TABLE users (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL,
+    email TEXT NOT NULL,
     password TEXT NOT NULL,
-    role TEXT CHECK(role IN ('admin', 'organizer', 'attendee', 'vendor')) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    role TEXT NOT NULL,
+    created_at TEXT,
     profile_image TEXT,
     phone TEXT,
     company TEXT,
-    verified BOOLEAN DEFAULT FALSE
+    verified INTEGER
 );
 
--- Events table with enhanced fields
-CREATE TABLE IF NOT EXISTS events (
+-- Basic Events table
+CREATE TABLE events (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     description TEXT,
-    date DATE NOT NULL,
-    end_date DATE,
+    date TEXT NOT NULL,
+    end_date TEXT,
     location TEXT,
     venue_map TEXT,
-    organizer_id TEXT REFERENCES users(id),
-    category TEXT CHECK(category IN ('academic', 'cultural', 'sports', 'technical', 'workshop', 'conference')) NOT NULL,
+    organizer_id TEXT,
+    category TEXT NOT NULL,
     capacity INTEGER,
-    ticket_price DECIMAL(10,2),
-    is_virtual BOOLEAN DEFAULT FALSE,
+    ticket_price REAL,
+    is_virtual INTEGER,
     virtual_link TEXT,
-    registration_deadline DATE,
-    status TEXT CHECK(status IN ('draft', 'published', 'cancelled', 'completed')) DEFAULT 'draft',
+    registration_deadline TEXT,
+    status TEXT,
     banner_image TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT,
+    updated_at TEXT
 );
 
--- Event sessions for multi-day events
-CREATE TABLE IF NOT EXISTS event_sessions (
+-- Basic Event sessions table
+CREATE TABLE event_sessions (
     id TEXT PRIMARY KEY,
-    event_id TEXT REFERENCES events(id) ON DELETE CASCADE,
+    event_id TEXT,
     title TEXT NOT NULL,
     description TEXT,
     speaker TEXT,
-    start_time TIMESTAMP NOT NULL,
-    end_time TIMESTAMP NOT NULL,
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
     location TEXT,
     capacity INTEGER,
-    type TEXT CHECK(type IN ('talk', 'workshop', 'panel', 'networking', 'other'))
+    type TEXT
 );
 
--- Registrations with enhanced tracking
-CREATE TABLE IF NOT EXISTS registrations (
+-- Basic Registrations table
+CREATE TABLE registrations (
     id TEXT PRIMARY KEY,
-    event_id TEXT REFERENCES events(id) ON DELETE CASCADE,
-    user_id TEXT REFERENCES users(id),
-    status TEXT CHECK(status IN ('confirmed', 'waitlist', 'cancelled', 'attended')) NOT NULL,
-    registration_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    payment_status TEXT CHECK(payment_status IN ('pending', 'completed', 'refunded', 'failed')),
+    event_id TEXT,
+    user_id TEXT,
+    status TEXT NOT NULL,
+    registration_time TEXT,
+    payment_status TEXT,
     payment_id TEXT,
-    ticket_type TEXT CHECK(ticket_type IN ('regular', 'vip', 'student', 'early_bird')),
-    amount_paid DECIMAL(10,2),
+    ticket_type TEXT,
+    amount_paid REAL,
     qr_code TEXT,
-    check_in_time TIMESTAMP,
-    feedback_submitted BOOLEAN DEFAULT FALSE
+    check_in_time TEXT,
+    feedback_submitted INTEGER
 );
 
--- Vendor booths
-CREATE TABLE IF NOT EXISTS vendor_booths (
+-- Basic Vendor booths table
+CREATE TABLE vendor_booths (
     id TEXT PRIMARY KEY,
-    event_id TEXT REFERENCES events(id) ON DELETE CASCADE,
-    vendor_id TEXT REFERENCES users(id),
+    event_id TEXT,
+    vendor_id TEXT,
     booth_number TEXT,
     location TEXT,
     description TEXT,
-    status TEXT CHECK(status IN ('pending', 'approved', 'rejected', 'active', 'closed')),
-    setup_time TIMESTAMP,
-    teardown_time TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    status TEXT,
+    setup_time TEXT,
+    teardown_time TEXT,
+    created_at TEXT
 );
 
--- Vendor products
-CREATE TABLE IF NOT EXISTS vendor_products (
+-- Basic Vendor products table
+CREATE TABLE vendor_products (
     id TEXT PRIMARY KEY,
-    booth_id TEXT REFERENCES vendor_booths(id) ON DELETE CASCADE,
+    booth_id TEXT,
     name TEXT NOT NULL,
     description TEXT,
-    price DECIMAL(10,2) NOT NULL,
+    price REAL NOT NULL,
     stock_quantity INTEGER,
     category TEXT,
     image_url TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT
 );
 
--- Sales transactions
-CREATE TABLE IF NOT EXISTS sales_transactions (
+-- Basic Sales transactions table
+CREATE TABLE sales_transactions (
     id TEXT PRIMARY KEY,
-    booth_id TEXT REFERENCES vendor_booths(id) ON DELETE CASCADE,
-    product_id TEXT REFERENCES vendor_products(id),
-    buyer_id TEXT REFERENCES users(id),
+    booth_id TEXT,
+    product_id TEXT,
+    buyer_id TEXT,
     quantity INTEGER NOT NULL,
-    unit_price DECIMAL(10,2) NOT NULL,
-    total_amount DECIMAL(10,2) NOT NULL,
-    payment_method TEXT CHECK(payment_method IN ('cash', 'card', 'mobile_payment')),
-    status TEXT CHECK(status IN ('completed', 'refunded', 'failed')),
-    transaction_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    unit_price REAL NOT NULL,
+    total_amount REAL NOT NULL,
+    payment_method TEXT,
+    status TEXT,
+    transaction_time TEXT
 );
 
--- Event feedback
-CREATE TABLE IF NOT EXISTS event_feedback (
+-- Basic Event feedback table
+CREATE TABLE event_feedback (
     id TEXT PRIMARY KEY,
-    event_id TEXT REFERENCES events(id) ON DELETE CASCADE,
-    user_id TEXT REFERENCES users(id),
-    rating INTEGER CHECK(rating BETWEEN 1 AND 5),
+    event_id TEXT,
+    user_id TEXT,
+    rating INTEGER,
     feedback_text TEXT,
-    anonymous BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    anonymous INTEGER,
+    created_at TEXT
 );
 
--- Vendor ratings
-CREATE TABLE IF NOT EXISTS vendor_ratings (
+-- Basic Vendor ratings table
+CREATE TABLE vendor_ratings (
     id TEXT PRIMARY KEY,
-    booth_id TEXT REFERENCES vendor_booths(id) ON DELETE CASCADE,
-    user_id TEXT REFERENCES users(id),
-    rating INTEGER CHECK(rating BETWEEN 1 AND 5),
+    booth_id TEXT,
+    user_id TEXT,
+    rating INTEGER,
     review_text TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT
 );
 
--- Event announcements
-CREATE TABLE IF NOT EXISTS announcements (
+-- Basic Announcements table
+CREATE TABLE announcements (
     id TEXT PRIMARY KEY,
-    event_id TEXT REFERENCES events(id) ON DELETE CASCADE,
+    event_id TEXT,
     title TEXT NOT NULL,
     content TEXT NOT NULL,
-    priority TEXT CHECK(priority IN ('low', 'medium', 'high', 'urgent')),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_by TEXT REFERENCES users(id)
+    priority TEXT,
+    created_at TEXT,
+    created_by TEXT
 );
-
--- Create indexes for better query performance
-CREATE INDEX IF NOT EXISTS idx_events_date ON events(date);
-CREATE INDEX IF NOT EXISTS idx_events_category ON events(category);
-CREATE INDEX IF NOT EXISTS idx_registrations_event_user ON registrations(event_id, user_id);
-CREATE INDEX IF NOT EXISTS idx_vendor_booths_event ON vendor_booths(event_id);
-CREATE INDEX IF NOT EXISTS idx_sales_booth_time ON sales_transactions(booth_id, transaction_time);
-CREATE INDEX IF NOT EXISTS idx_event_sessions_event ON event_sessions(event_id);

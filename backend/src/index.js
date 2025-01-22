@@ -12,8 +12,19 @@ import vendorRoutes from './routes/vendors.js';
 import adminRoutes from './routes/admin.js';
 import { authenticateToken } from './middleware/auth.js';
 
-// Initialize Redis client
+// Initialize Redis client with error handling
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+
+redis.on('error', (err) => {
+  console.error('Redis error:', err);
+  if (err.code === 'ECONNREFUSED') {
+    console.error('Redis connection refused. Please check if Redis is running.');
+  }
+});
+
+redis.on('connect', () => {
+  console.log('Connected to Redis');
+});
 
 const app = express();
 
@@ -25,7 +36,10 @@ app.use(morgan('combined'));
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
+  max: 100, // limit each IP to 100 requests per windowMs
+  keyGenerator: (req) => {
+    return req.headers['x-forwarded-for'] || req.ip;
+  }
 });
 app.use(limiter);
 
@@ -37,8 +51,28 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
+app.use(express.json({ 
+  limit: '10mb',
+  verify: (req, res, buf, encoding) => {
+    try {
+      JSON.parse(buf.toString(encoding || 'utf8'));
+    } catch (e) {
+      throw new Error('Invalid JSON');
+    }
+  }
+}));
+
+// Add request ID middleware
+app.use((req, res, next) => {
+  req.id = crypto.randomUUID();
+  next();
+});
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -115,22 +149,25 @@ const server = app.listen(PORT, () => {
 });
 
 // Handle graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM received. Shutting down gracefully...');
+// Handle shutdown signals
+['SIGTERM', 'SIGINT'].forEach(signal => {
+  process.on(signal, async () => {
+  console.log(`${signal} received. Shutting down gracefully...`);
   
   // Close Redis connection
   await redis.quit();
   
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
+    server.close(() => {
+      console.log('Server closed');
+      process.exit(0);
+    });
+    
+    // Force close after 10s
+    setTimeout(() => {
+      console.log('Forcing shutdown after timeout');
+      process.exit(1);
+    }, 10000);
   });
-  
-  // Force close after 10s
-  setTimeout(() => {
-    console.log('Forcing shutdown after timeout');
-    process.exit(1);
-  }, 10000);
 });
 
 // Handle uncaught exceptions

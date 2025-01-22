@@ -3,7 +3,8 @@ import { z } from 'zod';
 import db from '../db/index.js';
 import { authenticateToken, authorize } from '../middleware/auth.js';
 import { redis } from '../index.js';
-import { sanitizeHtml } from 'sanitize-html';
+import pkg from 'sanitize-html';
+const { sanitizeHtml } = pkg;
 
 const router = express.Router();
 
