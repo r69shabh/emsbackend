@@ -15,11 +15,12 @@ const PORTAL_ROLES = {
   ATTENDEE_PORTAL: ['attendee']
 };
 
-// Only allow attendee registration through public route
+// Public registration schema
 const publicUserSchema = z.object({
   name: z.string().min(2),
   email: z.string().email(),
-  password: z.string().min(6)
+  password: z.string().min(6),
+  role: z.enum(['attendee', 'organizer']).default('attendee')
 });
 
 // Schema for admin creating/updating users
@@ -49,19 +50,19 @@ router.post('/register', async (req, res) => {
 
     await db.exec(
       'INSERT INTO users (id, name, email, password, role, verified) VALUES (?, ?, ?, ?, ?, ?)',
-      [userId, name, email, hashedPassword, 'attendee', true]
+      [userId, name, email, hashedPassword, validatedData.role, true]
     );
 
     const token = jwt.sign(
-      { id: userId, email, role: 'attendee' },
+      { id: userId, email, role: validatedData.role },
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '24h' }
     );
 
     res.status(201).json({ 
       token,
-      user: { id: userId, name, email, role: 'attendee' },
-      portal: 'attendee'
+      user: { id: userId, name, email, role: validatedData.role },
+      portal: validatedData.role
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -98,12 +99,38 @@ router.post('/login', async (req, res) => {
 
     // Check if user has access to requested portal
     const portalKey = portal.toUpperCase() + '_PORTAL';
+    console.log('Checking portal access:', {
+      portalKey,
+      userRole: user.role,
+      PORTAL_ROLES: PORTAL_ROLES
+    });
+    
+    if (!PORTAL_ROLES[portalKey]) {
+      console.error('Invalid portal key:', portalKey);
+      return res.status(400).json({ error: 'Invalid portal' });
+    }
+
     if (!PORTAL_ROLES[portalKey].includes(user.role)) {
+      console.error('Access denied:', {
+        userId: user.id,
+        requestedPortal: portal,
+        userRole: user.role,
+        allowedRoles: PORTAL_ROLES[portalKey]
+      });
+      const allowedPortal = Object.keys(PORTAL_ROLES).find(key => 
+        PORTAL_ROLES[key].includes(user.role)
+      )?.toLowerCase().replace('_portal', '');
+      
+      console.error('Access denied:', {
+        userId: user.id,
+        requestedPortal: portal,
+        userRole: user.role,
+        allowedPortal
+      });
+      
       return res.status(403).json({ 
         error: 'You do not have access to this portal',
-        allowedPortal: Object.keys(PORTAL_ROLES).find(key => 
-          PORTAL_ROLES[key].includes(user.role)
-        )?.toLowerCase().replace('_portal', '')
+        allowedPortal
       });
     }
 
@@ -244,6 +271,24 @@ router.post('/logout', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Logout error:', error);
     res.status(500).json({ error: 'Logout failed' });
+  }
+});
+
+// Delete current user
+router.delete('/auth/users/me', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    // Delete user from database
+    await db.exec('DELETE FROM users WHERE id = ?', [userId]);
+    
+    // Delete session from Redis
+    await redis.del(`session:${userId}`);
+    
+    res.json({ message: 'User deleted successfully' });
+  } catch (error) {
+    console.error('Delete user error:', error);
+    res.status(500).json({ error: 'Failed to delete user' });
   }
 });
 

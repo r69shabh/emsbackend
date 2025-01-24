@@ -9,29 +9,26 @@ CREATE TABLE users (
     profile_image TEXT,
     phone TEXT,
     company TEXT,
-    verified INTEGER
+    verified INTEGER,
+    status TEXT NOT NULL DEFAULT 'active'
 );
 
--- Basic Events table
-CREATE TABLE events (
+-- Update events table
+CREATE TABLE IF NOT EXISTS events (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
-    description TEXT,
+    description TEXT NOT NULL,
     date TEXT NOT NULL,
-    end_date TEXT,
-    location TEXT,
-    venue_map TEXT,
-    organizer_id TEXT,
+    location TEXT NOT NULL,
+    capacity INTEGER NOT NULL,
     category TEXT NOT NULL,
-    capacity INTEGER,
-    ticket_price REAL,
-    is_virtual INTEGER,
-    virtual_link TEXT,
+    ticket_price REAL DEFAULT 0,
+    is_virtual INTEGER DEFAULT 0,
     registration_deadline TEXT,
-    status TEXT,
-    banner_image TEXT,
-    created_at TEXT,
-    updated_at TEXT
+    organizer_id TEXT NOT NULL,
+    status TEXT DEFAULT 'published',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (organizer_id) REFERENCES users(id)
 );
 
 -- Basic Event sessions table
@@ -48,20 +45,22 @@ CREATE TABLE event_sessions (
     type TEXT
 );
 
--- Basic Registrations table
+-- Update Registrations table
 CREATE TABLE registrations (
     id TEXT PRIMARY KEY,
     event_id TEXT,
     user_id TEXT,
     status TEXT NOT NULL,
-    registration_time TEXT,
+    registration_time TEXT NOT NULL, -- This is the correct column name
     payment_status TEXT,
     payment_id TEXT,
     ticket_type TEXT,
     amount_paid REAL,
     qr_code TEXT,
     check_in_time TEXT,
-    feedback_submitted INTEGER
+    feedback_submitted INTEGER,
+    FOREIGN KEY (event_id) REFERENCES events(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
 -- Basic Vendor booths table

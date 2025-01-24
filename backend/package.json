@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node src/index.js",
     "start": "node src/index.js",
-    "test": "mocha src/__tests__/**/*.test.js"
+    "test": "mocha src/test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

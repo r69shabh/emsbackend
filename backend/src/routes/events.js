@@ -12,18 +12,24 @@ const router = express.Router();
 
 const CACHE_TTL = 300; // 5 minutes in seconds
 
+// Update schema definition
 const eventSchema = z.object({
-  title: z.string().min(3).max(100).transform(val => sanitizeHtml(val)),
-  description: z.string().max(1000).transform(val => sanitizeHtml(val)),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(val => new Date(val) > new Date(), {
-    message: "Event date must be in the future"
-  }),
-  location: z.string().min(3).max(200).transform(val => sanitizeHtml(val)),
-  category: z.enum(['academic', 'cultural', 'sports', 'technical']),
-  capacity: z.number().int().positive().max(10000),
-  ticketPrice: z.number().min(0).optional(),
-  isVirtual: z.boolean().optional(),
-  registrationDeadline: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
+  title: z.string().min(3).max(100),
+  description: z.string().min(3).max(1000),
+  date: z.string().refine(val => {
+    const eventDate = new Date(val);
+    const today = new Date();
+    // Set both dates to start of day for comparison
+    today.setHours(0, 0, 0, 0);
+    eventDate.setHours(0, 0, 0, 0);
+    return eventDate >= today;
+  }, { message: "Event date must be today or in the future" }),
+  location: z.string().min(3).max(200),
+  capacity: z.number().int().positive(),
+  category: z.enum(['conference', 'workshop', 'seminar', 'networking', 'other', 'academic']),
+  ticket_price: z.number().nonnegative().default(0),
+  is_virtual: z.boolean().optional().default(false),
+  registration_deadline: z.string().optional()
 });
 
 // Get all events with filters and caching
@@ -111,34 +117,58 @@ router.get('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Create event
+// Update create event route
 router.post('/', authenticateToken, authorize(['admin', 'organizer']), async (req, res) => {
   try {
-    const validatedData = eventSchema.parse(req.body);
+    console.log('Received event data:', req.body);
+    
+    // Convert fields to expected types
+    const normalizedData = {
+      ...req.body,
+      capacity: Number(req.body.capacity),
+      ticket_price: Number(req.body.ticket_price || 0),
+      is_virtual: Boolean(req.body.is_virtual),
+      registration_deadline: req.body.registration_deadline || null // Add default value
+    };
+
+    const validatedData = eventSchema.parse(normalizedData);
     const eventId = randomUUID();
 
     await db.exec(
-      `INSERT INTO events (id, title, description, date, location, organizer_id, category, capacity, ticketPrice, isVirtual, registrationDeadline)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO events (
+        id, title, description, date, location, capacity, 
+        category, ticket_price, is_virtual, registration_deadline,
+        organizer_id, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
       [
         eventId,
         validatedData.title,
         validatedData.description,
         validatedData.date,
         validatedData.location,
-        req.user.id,
-        validatedData.category,
         validatedData.capacity,
-        validatedData.ticketPrice,
-        validatedData.isVirtual,
-        validatedData.registrationDeadline
+        validatedData.category,
+        validatedData.ticket_price,
+        validatedData.is_virtual ? 1 : 0,
+        validatedData.registration_deadline || null, // Ensure null if not provided
+        req.user.id,
+        'published'
       ]
     );
 
-    res.status(201).json({ id: eventId });
+    const [createdEvent] = await db.query(
+      'SELECT * FROM events WHERE id = ?',
+      [eventId]
+    );
+
+    res.status(201).json(createdEvent);
   } catch (error) {
+    console.error('Event creation error:', error);
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
+      return res.status(400).json({ 
+        error: 'Validation error', 
+        details: error.errors 
+      });
     }
     res.status(500).json({ error: 'Failed to create event' });
   }
@@ -162,7 +192,8 @@ router.put('/:id', authenticateToken, authorize(['admin', 'organizer']), async (
 
     await db.exec(
       `UPDATE events 
-       SET title = ?, description = ?, date = ?, location = ?, category = ?, capacity = ?, ticketPrice = ?, isVirtual = ?, registrationDeadline = ?
+       SET title = ?, description = ?, date = ?, location = ?, category = ?, 
+           capacity = ?, ticket_price = ?, is_virtual = ?, registration_deadline = ?
        WHERE id = ?`,
       [
         validatedData.title,
@@ -171,9 +202,9 @@ router.put('/:id', authenticateToken, authorize(['admin', 'organizer']), async (
         validatedData.location,
         validatedData.category,
         validatedData.capacity,
-        validatedData.ticketPrice,
-        validatedData.isVirtual,
-        validatedData.registrationDeadline,
+        validatedData.ticket_price,
+        validatedData.is_virtual,
+        validatedData.registration_deadline,
         id
       ]
     );
@@ -332,11 +363,11 @@ router.get('/:id/attendees', authenticateToken, authorize(['admin', 'organizer']
     }
 
     const attendees = await db.query(
-      `SELECT u.id, u.name, u.email, r.registration_date, r.status
+      `SELECT u.id, u.name, u.email, r.registration_time, r.status
        FROM registrations r
        JOIN users u ON r.user_id = u.id
        WHERE r.event_id = ?
-       ORDER BY r.registration_date DESC`,
+       ORDER BY r.registration_time DESC`,
       [id]
     );
 

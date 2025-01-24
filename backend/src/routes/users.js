@@ -8,16 +8,17 @@ const router = express.Router();
 router.get('/registered-events', authenticateToken, async (req, res) => {
   try {
     const events = await db.query(
-      `SELECT e.*, u.name as organizer_name, r.registration_date, r.status, r.qr_code
-       FROM registrations r
-       JOIN events e ON r.event_id = e.id
-       JOIN users u ON e.organizer_id = u.id
+      `SELECT e.*, r.status, r.registration_time, r.qr_code
+       FROM events e
+       JOIN registrations r ON e.id = r.event_id
        WHERE r.user_id = ?
-       ORDER BY e.date ASC`,
+       ORDER BY r.registration_time DESC`,
       [req.user.id]
     );
+    
     res.json(events);
   } catch (error) {
+    console.error('Error fetching registered events:', error);
     res.status(500).json({ error: 'Failed to fetch registered events' });
   }
 });

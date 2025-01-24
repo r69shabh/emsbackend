@@ -19,7 +19,7 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
-    "chai": "^5.1.0",
+    "chai": "^5.1.2",
     "mocha": "^10.3.0",
     "supertest": "^6.3.4"
   }
